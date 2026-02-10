@@ -42,8 +42,38 @@ jobs:
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Xcode 版本
-        run: xcodebuild -version
+      - name: 选择 Swift 6.2+ 的 Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t XCODE_APPS < <(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V -r)
+          if [[ ${#XCODE_APPS[@]} -eq 0 ]]; then
+            echo "错误：Runner 上没有发现可用的 Xcode 安装。" >&2
+            exit 1
+          fi
+
+          FOUND=""
+          for APP in "${XCODE_APPS[@]}"; do
+            DEV_DIR="$APP/Contents/Developer"
+            sudo xcode-select -s "$DEV_DIR"
+            SWIFT_LINE="$(xcrun swift --version | head -n 1)"
+            echo "检查 $APP -> $SWIFT_LINE"
+
+            if echo "$SWIFT_LINE" | grep -Eq 'Swift version (6\.[2-9]|[7-9]\.)'; then
+              FOUND="$APP"
+              break
+            fi
+          done
+
+          if [[ -z "$FOUND" ]]; then
+            echo "错误：未找到 Swift 6.2+ 的 Xcode。当前依赖 SweetCookieKit@0.4.0 需要 Swift 6.2+。" >&2
+            exit 1
+          fi
+
+          echo "已选择 Xcode: $FOUND"
+          xcodebuild -version
+          xcrun swift --version
 
       - name: 构建 macOS Archive
         shell: bash
