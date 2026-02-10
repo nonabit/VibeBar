@@ -1,0 +1,100 @@
+name: Release macOS App
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布 Tag（例如 v1.0.1）；留空表示使用当前 ref"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 解析发布标签
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && -n "${GITHUB_REF_NAME:-}" ]]; then
+            TAG="$GITHUB_REF_NAME"
+          elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            git checkout "tags/$TAG"
+          else
+            echo "错误：workflow_dispatch 触发时请传入 tag（如 v1.0.1）" >&2
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Xcode 版本
+        run: xcodebuild -version
+
+      - name: 构建 macOS Archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project VibeBar.xcodeproj \
+            -scheme VibeBar \
+            -configuration Release \
+            -destination "platform=macOS" \
+            -archivePath "$RUNNER_TEMP/VibeBar.xcarchive" \
+            archive
+
+      - name: 打包发布产物
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          ZIP_NAME="VibeBar-${{ steps.meta.outputs.tag }}-macOS.zip"
+          SHA_NAME="${ZIP_NAME}.sha256"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/VibeBar.xcarchive/Products/Applications/VibeBar.app" \
+            "dist/$ZIP_NAME"
+
+          shasum -a 256 "dist/$ZIP_NAME" > "dist/$SHA_NAME"
+
+          echo "zip=dist/$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha=dist/$SHA_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: 创建或更新 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.meta.outputs.tag }}"
+          TITLE="VibeBar $TAG"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "${{ steps.package.outputs.zip }}" \
+              "${{ steps.package.outputs.sha }}" \
+              --clobber
+          else
+            gh release create "$TAG" \
+              "${{ steps.package.outputs.zip }}" \
+              "${{ steps.package.outputs.sha }}" \
+              --title "$TITLE" \
+              --notes "自动构建发布包。"
+          fi
