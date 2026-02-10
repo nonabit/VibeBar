@@ -1,6 +1,6 @@
 import Foundation
 
-public struct KimiUsageSnapshot {
+public struct UsageSnapshot {
     public let weeklyUsed: Int
     public let weeklyLimit: Int
     public let weeklyRemaining: Int

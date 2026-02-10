@@ -237,7 +237,7 @@ struct KimiSubscriptionResponse: Decodable {
 }
 
 struct KimiUsageResult {
-    let snapshot: KimiUsageSnapshot
+    let snapshot: UsageSnapshot
     let planName: String?
 }
 
@@ -394,7 +394,7 @@ struct CodexUsageResponse: Decodable {
 }
 
 struct CodexUsageResult {
-    let snapshot: KimiUsageSnapshot
+    let snapshot: UsageSnapshot
     let planType: String?
 }
 
@@ -446,7 +446,7 @@ final class CodexAPIClient {
         let primaryUsed = max(0, min(100, primary.usedPercent))
         let secondaryUsed = decoded.rateLimit?.secondaryWindow.map { max(0, min(100, $0.usedPercent)) }
 
-        let snapshot = KimiUsageSnapshot(
+        let snapshot = UsageSnapshot(
             weeklyUsed: primaryUsed,
             weeklyLimit: 100,
             weeklyRemaining: max(0, 100 - primaryUsed),
@@ -519,7 +519,7 @@ final class KimiAPIClient {
         }) ?? coding.limits?.first
         let rate = fiveHourRate.map { self.parseUsageNumbers(detail: $0.detail) }
 
-        let snapshot = KimiUsageSnapshot(
+        let snapshot = UsageSnapshot(
             weeklyUsed: weekly.used,
             weeklyLimit: weekly.limit,
             weeklyRemaining: weekly.remaining,
@@ -886,13 +886,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var selectedProvider: ProviderTab = .kimi
 
-    private var kimiSnapshot: KimiUsageSnapshot?
+    private var kimiSnapshot: UsageSnapshot?
     private var kimiError: String?
     private var kimiTokenSourceText: String = "-"
     private var kimiPlanText: String?
     private var cachedKimiToken: TokenResolution?
 
-    private var codexSnapshot: KimiUsageSnapshot?
+    private var codexSnapshot: UsageSnapshot?
     private var codexError: String?
     private var codexTokenSourceText: String = "-"
     private var codexPlanText: String?
@@ -1110,7 +1110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeUsageCardItem() -> NSMenuItem {
         let snapshot = displaySnapshotForCurrentProvider()
-        let view = KimiUsageCardView(
+        let view = UsageCardView(
             selectedProvider: selectedProvider,
             onSelectProvider: { [weak self] provider in
                 Task { @MainActor [weak self] in
@@ -1144,7 +1144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    private func displaySnapshotForCurrentProvider() -> KimiUsageSnapshot? {
+    private func displaySnapshotForCurrentProvider() -> UsageSnapshot? {
         guard let snapshot = activeSnapshot else { return nil }
         guard selectedProvider == .kimi else { return snapshot }
 
@@ -1156,7 +1156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let sessionRemaining = snapshot.rateLimitRemaining ?? max(0, sessionLimit - sessionUsed)
 
-        return KimiUsageSnapshot(
+        return UsageSnapshot(
             weeklyUsed: sessionUsed,
             weeklyLimit: sessionLimit,
             weeklyRemaining: sessionRemaining,
@@ -1176,7 +1176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshUsage(for: provider)
     }
 
-    private var activeSnapshot: KimiUsageSnapshot? {
+    private var activeSnapshot: UsageSnapshot? {
         selectedProvider == .kimi ? kimiSnapshot : codexSnapshot
     }
 
@@ -1255,7 +1255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return value
     }
 
-    private func makeStatusIcon(snapshot: KimiUsageSnapshot?) -> NSImage {
+    private func makeStatusIcon(snapshot: UsageSnapshot?) -> NSImage {
         let size = NSSize(width: 18, height: 14)
         let image = NSImage(size: size)
         image.lockFocus()
@@ -1324,7 +1324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return image
     }
 
-    private func makeStatusTooltip(snapshot: KimiUsageSnapshot?) -> String {
+    private func makeStatusTooltip(snapshot: UsageSnapshot?) -> String {
         let providerName = selectedProvider == .kimi ? "Kimi" : "Codex"
         guard let snapshot else {
             return "\(providerName)：暂无可用数据"

@@ -95,8 +95,10 @@ jobs:
           set -euo pipefail
 
           mkdir -p dist
-          ZIP_NAME="VibeBar-${{ steps.meta.outputs.tag }}-macOS.zip"
-          SHA_NAME="${ZIP_NAME}.sha256"
+          RAW_TAG="${{ steps.meta.outputs.tag }}"
+          VERSION="${RAW_TAG#v}"
+          ZIP_NAME="VibeBar-${VERSION}-macOS-universal.zip"
+          SHA_NAME="VibeBar-${VERSION}-macOS-universal.sha256"
 
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/VibeBar.xcarchive/Products/Applications/VibeBar.app" \

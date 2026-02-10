@@ -96,7 +96,7 @@ private struct UsageSectionView: View {
     }
 }
 
-public struct KimiUsageCardView: View {
+public struct UsageCardView: View {
     private let menuEdgeInset: CGFloat = 16
 
     public let selectedProvider: ProviderTab
@@ -105,7 +105,7 @@ public struct KimiUsageCardView: View {
     public let planText: String?
     public let primaryTitle: String
     public let secondaryTitle: String
-    public let snapshot: KimiUsageSnapshot?
+    public let snapshot: UsageSnapshot?
     public let tokenSourceText: String
     public let updatedText: String
     public let weeklyResetText: String
@@ -119,7 +119,7 @@ public struct KimiUsageCardView: View {
         planText: String?,
         primaryTitle: String,
         secondaryTitle: String,
-        snapshot: KimiUsageSnapshot?,
+        snapshot: UsageSnapshot?,
         tokenSourceText: String,
         updatedText: String,
         weeklyResetText: String,

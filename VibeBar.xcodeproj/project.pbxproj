@@ -7,12 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0DE63179D8A0CD96397A86FE /* KimiUsageCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71983935A4EF2D526123192 /* KimiUsageCardView.swift */; };
-		2C166DA809EDDA48E6E6EFFD /* KimiUsageCardView+Preview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9492F18E90A17F04484B5745 /* KimiUsageCardView+Preview.swift */; };
+		0DE63179D8A0CD96397A86FE /* UsageCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71983935A4EF2D526123192 /* UsageCardView.swift */; };
+		2C166DA809EDDA48E6E6EFFD /* UsageCardView+Preview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9492F18E90A17F04484B5745 /* UsageCardView+Preview.swift */; };
 		B066A9861EF607DDEA033788 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D1A1A869DA83E0D1907B97B0 /* Assets.xcassets */; };
 		B34264D78ACFC1E5E1008C5C /* VibeBarUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57C158701375C7A60321EDC9 /* VibeBarUI.framework */; };
 		B76DDF116F585FBCE732A373 /* VibeBarUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 57C158701375C7A60321EDC9 /* VibeBarUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		CCA181EEA9FBACB956E486AA /* KimiUsageSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E3344DB27F686E0C96305C8 /* KimiUsageSnapshot.swift */; };
+		CCA181EEA9FBACB956E486AA /* UsageSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E3344DB27F686E0C96305C8 /* UsageSnapshot.swift */; };
 		F8A730AAD47878C9780BA2EA /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED9677D4E9C39EB14102868D /* main.swift */; };
 		FC299FA36F0BB26F20521812 /* SweetCookieKit in Frameworks */ = {isa = PBXBuildFile; productRef = 255FAFB82ECF094B6F605200 /* SweetCookieKit */; };
 /* End PBXBuildFile section */
@@ -42,11 +42,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		3E3344DB27F686E0C96305C8 /* KimiUsageSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageSnapshot.swift; sourceTree = "<group>"; };
+		3E3344DB27F686E0C96305C8 /* UsageSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSnapshot.swift; sourceTree = "<group>"; };
 		57C158701375C7A60321EDC9 /* VibeBarUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = VibeBarUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		9492F18E90A17F04484B5745 /* KimiUsageCardView+Preview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KimiUsageCardView+Preview.swift"; sourceTree = "<group>"; };
+		9492F18E90A17F04484B5745 /* UsageCardView+Preview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UsageCardView+Preview.swift"; sourceTree = "<group>"; };
 		9BB854BBC7847BBFEFBE6001 /* VibeBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VibeBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B71983935A4EF2D526123192 /* KimiUsageCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageCardView.swift; sourceTree = "<group>"; };
+		B71983935A4EF2D526123192 /* UsageCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageCardView.swift; sourceTree = "<group>"; };
 		D1A1A869DA83E0D1907B97B0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		ED9677D4E9C39EB14102868D /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -67,9 +67,9 @@
 		144841402C35AE8EDD489B7C /* VibeBarUI */ = {
 			isa = PBXGroup;
 			children = (
-				B71983935A4EF2D526123192 /* KimiUsageCardView.swift */,
-				9492F18E90A17F04484B5745 /* KimiUsageCardView+Preview.swift */,
-				3E3344DB27F686E0C96305C8 /* KimiUsageSnapshot.swift */,
+				B71983935A4EF2D526123192 /* UsageCardView.swift */,
+				9492F18E90A17F04484B5745 /* UsageCardView+Preview.swift */,
+				3E3344DB27F686E0C96305C8 /* UsageSnapshot.swift */,
 			);
 			name = VibeBarUI;
 			path = Sources/VibeBarUI;
@@ -206,9 +206,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2C166DA809EDDA48E6E6EFFD /* KimiUsageCardView+Preview.swift in Sources */,
-				0DE63179D8A0CD96397A86FE /* KimiUsageCardView.swift in Sources */,
-				CCA181EEA9FBACB956E486AA /* KimiUsageSnapshot.swift in Sources */,
+				2C166DA809EDDA48E6E6EFFD /* UsageCardView+Preview.swift in Sources */,
+				0DE63179D8A0CD96397A86FE /* UsageCardView.swift in Sources */,
+				CCA181EEA9FBACB956E486AA /* UsageSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

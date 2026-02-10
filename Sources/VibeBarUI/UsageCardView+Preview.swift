@@ -2,14 +2,14 @@ import SwiftUI
 
 #if DEBUG
 #Preview("With Data") {
-    KimiUsageCardView(
+    UsageCardView(
         selectedProvider: .kimi,
         onSelectProvider: nil,
         providerTitle: "Kimi",
         planText: "Allegretto",
         primaryTitle: "Session",
         secondaryTitle: "Weekly",
-        snapshot: KimiUsageSnapshot(
+        snapshot: UsageSnapshot(
             weeklyUsed: 320,
             weeklyLimit: 1024,
             weeklyRemaining: 704,
@@ -29,7 +29,7 @@ import SwiftUI
 }
 
 #Preview("Error State") {
-    KimiUsageCardView(
+    UsageCardView(
         selectedProvider: .codex,
         onSelectProvider: nil,
         providerTitle: "Codex",
