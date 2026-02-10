@@ -47,14 +47,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t XCODE_APPS < <(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V -r)
-          if [[ ${#XCODE_APPS[@]} -eq 0 ]]; then
+          XCODE_APPS="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -r || true)"
+          if [[ -z "$XCODE_APPS" ]]; then
             echo "错误：Runner 上没有发现可用的 Xcode 安装。" >&2
             exit 1
           fi
 
           FOUND=""
-          for APP in "${XCODE_APPS[@]}"; do
+          while IFS= read -r APP; do
+            [[ -z "$APP" ]] && continue
             DEV_DIR="$APP/Contents/Developer"
             sudo xcode-select -s "$DEV_DIR"
             SWIFT_LINE="$(xcrun swift --version | head -n 1)"
@@ -64,7 +65,7 @@ jobs:
               FOUND="$APP"
               break
             fi
-          done
+          done <<< "$XCODE_APPS"
 
           if [[ -z "$FOUND" ]]; then
             echo "错误：未找到 Swift 6.2+ 的 Xcode。当前依赖 SweetCookieKit@0.4.0 需要 Swift 6.2+。" >&2
