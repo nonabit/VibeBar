@@ -1,12 +1,12 @@
 import SwiftUI
 
 #if DEBUG
-#Preview("有数据") {
+#Preview("With Data") {
     KimiUsageCardView(
         selectedProvider: .kimi,
         onSelectProvider: nil,
         providerTitle: "Kimi",
-        planText: "Pro",
+        planText: "Allegretto",
         primaryTitle: "Session",
         secondaryTitle: "Weekly",
         snapshot: KimiUsageSnapshot(
@@ -19,16 +19,16 @@ import SwiftUI
             rateLimitRemaining: 80,
             rateLimitResetAt: Date().addingTimeInterval(2 * 3600),
             updatedAt: Date()),
-        tokenSourceText: "浏览器(Default)",
+        tokenSourceText: "Browser (Default)",
         updatedText: "2026-02-09 18:30:00",
-        weeklyResetText: "20小时后",
-        rateResetText: "2小时后",
+        weeklyResetText: "Resets in 20h",
+        rateResetText: "Resets in 2h",
         lastError: nil)
     .frame(width: 320)
     .padding()
 }
 
-#Preview("错误态") {
+#Preview("Error State") {
     KimiUsageCardView(
         selectedProvider: .codex,
         onSelectProvider: nil,
@@ -39,9 +39,9 @@ import SwiftUI
         snapshot: nil,
         tokenSourceText: "-",
         updatedText: "-",
-        weeklyResetText: "重置未知",
-        rateResetText: "重置未知",
-        lastError: "未找到 kimi-auth token")
+        weeklyResetText: "Reset time unavailable",
+        rateResetText: "Reset time unavailable",
+        lastError: "kimi-auth token not found")
     .frame(width: 320)
     .padding()
 }

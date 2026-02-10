@@ -30,20 +30,17 @@ private struct ThinProgressBar: View {
 
 private struct UsageSectionView: View {
     public let title: String
-    public let used: Int
     public let limit: Int
     public let remaining: Int
     public let resetText: String
 
     public init(
         title: String,
-        used: Int,
         limit: Int,
         remaining: Int,
         resetText: String)
     {
         self.title = title
-        self.used = used
         self.limit = limit
         self.remaining = remaining
         self.resetText = resetText
@@ -79,9 +76,6 @@ private struct UsageSectionView: View {
                 Text(self.title)
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Text("\(self.used)/\(self.limit)")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
             }
 
             ThinProgressBar(
@@ -154,7 +148,7 @@ public struct KimiUsageCardView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(self.providerTitle)
                         .font(.system(size: 15, weight: .semibold))
-                    Text("更新 \(self.updatedText)")
+                    Text("Updated \(self.updatedText)")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -171,7 +165,6 @@ public struct KimiUsageCardView: View {
             if let snapshot = self.snapshot {
                 UsageSectionView(
                     title: self.primaryTitle,
-                    used: snapshot.weeklyUsed,
                     limit: snapshot.weeklyLimit,
                     remaining: snapshot.weeklyRemaining,
                     resetText: self.weeklyResetText)
@@ -183,14 +176,13 @@ public struct KimiUsageCardView: View {
 
                     UsageSectionView(
                         title: self.secondaryTitle,
-                        used: rateUsed,
                         limit: rateLimit,
                         remaining: snapshot.rateLimitRemaining ?? max(0, rateLimit - rateUsed),
                         resetText: self.rateResetText)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("尚未获取到可用数据")
+                    Text("No usage data yet")
                         .font(.system(size: 13, weight: .medium))
                     if let lastError = self.lastError, !lastError.isEmpty {
                         Text(lastError)
@@ -198,7 +190,7 @@ public struct KimiUsageCardView: View {
                             .foregroundStyle(.red)
                             .lineLimit(3)
                     }
-                    Text(self.selectedProvider == .kimi ? "请先在浏览器登录 Kimi，再点击“立即刷新”。" : "请先运行 codex 完成登录，再点击“立即刷新”。")
+                    Text(self.selectedProvider == .kimi ? "Sign in to Kimi in your browser, then click Refresh Now." : "Run codex login first, then click Refresh Now.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -208,10 +200,10 @@ public struct KimiUsageCardView: View {
             Divider()
 
             HStack {
-                Text("来源: \(self.tokenSourceText)")
+                Text("Source: \(self.tokenSourceText)")
                 Spacer()
                 if let lastError = self.lastError, !lastError.isEmpty, self.snapshot == nil {
-                    Text("错误")
+                    Text("Error")
                         .foregroundStyle(.red)
                 }
             }

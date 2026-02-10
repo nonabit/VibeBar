@@ -1,94 +1,106 @@
-# VibeBar (MVP)
+# VibeBar
 
-一个最小可用的 macOS Menubar 工具：支持 Kimi 与 Codex 两个 provider 的订阅/额度监控，并在菜单中通过 Tab 切换查看。
+你的 AI Coding 订阅额度仪表盘，常驻 macOS 菜单栏。
 
-## MVP 能力
+中文 | [English](#english)
 
-- 自动从已登录浏览器读取 `kimi-auth` JWT（通过 SweetCookieKit）。
-- 调用 `POST https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages`。
-- 从 `~/.codex/auth.json`（或 `$CODEX_HOME/auth.json`）读取 Codex 凭据。
-- 调用 `GET https://chatgpt.com/backend-api/wham/usage` 获取 Codex 额度窗口。
-- 菜单栏展示：
-  - Kimi：周额度 + 5 小时窗口
-  - Codex：Session + Weekly
-  - 重置时间
-  - 套餐名（Codex 来自 `plan_type`/`auth.json`，Kimi 来自 `GetSubscription`）
-- 顶部 Tab 切换：`Kimi / Codex`
-- token 缓存到本机钥匙串（`ThisDeviceOnly`，不走 iCloud 同步）。
-- 5 分钟自动刷新，支持手动刷新。
+## 中文
 
-## 运行环境
+VibeBar 是一个轻量、原生、低干扰的 menubar 工具，用来实时查看 Kimi 与 Codex 的订阅使用状态。你不需要反复打开网页控制台，抬头就能看到当前额度、重置时间和套餐信息。
 
-- macOS 14+
-- Xcode 16+（或 Swift 6 工具链）
+### 产品预览
 
-## Xcode 工程
+**App Icon**
 
-仓库已包含可直接打开的工程文件：
+![VibeBar App Icon](Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png)
 
-- `VibeBar.xcodeproj`
+**菜单界面**
 
-使用方式：
+![VibeBar Menu Preview](Resources/Screenshots/menu-ui.png)
 
-1. 双击打开 `VibeBar.xcodeproj`
-2. 选择 Scheme：`VibeBar`
-3. Run Destination 选择 `My Mac`
-4. 按 `⌘R` 运行
+### 为什么做它
 
-预览方式（卡片 UI）：
+- 订阅制工具越来越多，额度窗口越来越复杂（Session、5 小时窗口、Weekly）。
+- 控制台信息分散，切换成本高。
+- 你需要的是“随时可见”的状态，而不是“临时去查”的状态。
 
-1. 切换 Scheme 到 `VibeBarUI`
-2. 打开 `Sources/VibeBarUI/KimiUsageCardView+Preview.swift`
-3. 打开 Canvas 并点击 `Resume`
+### 核心能力
 
-如果修改了 `project.yml`，可重新生成工程：
+- 双 Provider：`Kimi / Codex` 一键切换。
+- 多窗口监控：支持 `Session`、`Weekly`、`5 小时窗口` 等配额视图。
+- 倒计时展示：统一为 `Resets in 5d / 3h / 45m` 短格式。
+- 套餐识别：显示当前订阅套餐名称。
+- 原生体验：macOS 菜单栏交互，打开即看，不打断编码流。
+- 自动刷新：持续更新；也支持手动立即刷新。
 
-```bash
-xcodegen generate
-```
+### 适合谁
 
-### App Icon（分发用）
+- 重度使用 Codex / Kimi 的开发者。
+- 多模型并行工作的独立开发者与小团队。
+- 对“额度节奏”敏感、希望把控每日产能的人。
 
-项目已包含 `Resources/Assets.xcassets/AppIcon.appiconset`，并已接入 target。
+### 隐私与安全
 
-如需重新生成品牌图标（`AppIcon.appiconset` 必定更新；`Resources/AppIcon.icns` 仅在 `iconutil` 成功时生成）：
+- 数据读取与缓存以本机为主，不做云端托管。
+- 敏感凭据使用系统 Keychain 存储策略。
+- 项目定位是个人效率工具，不是官方客户端。
 
-```bash
-./scripts/generate_app_icon.sh
-```
+### 当前阶段
 
-## 首次使用
+- 这是一个可用的 MVP，核心链路已打通。
+- 欢迎提交 Issue / 反馈建议，一起迭代成更完整的产品。
 
-1. 先在浏览器登录 Kimi（`https://www.kimi.com/code/console`）。
-2. 先运行过 `codex` 并完成登录（确保本地存在 `~/.codex/auth.json`）。
-3. 给应用必要权限（常见为 Full Disk Access / Keychain 提示，取决于浏览器）。
-4. 编译运行：
+### 路线图（Roadmap）
 
-```bash
-swift run VibeBar
-```
+- 更多 Provider 接入（统一额度视图）。
+- 更细粒度的提醒策略（阈值提醒、窗口重置提醒）。
+- 更完整的统计趋势（按天/周用量节奏）。
+- 更完善的分发体验（签名、公证、安装体验优化）。
 
-## 手动调试脚本
+---
 
-仓库包含两个探针脚本：
+## English
 
-- `scripts/kimi_probe.sh`：测试 `kimi-auth` JWT 到 `GetUsages`
-- `scripts/kimi_k2_probe.sh`：测试 `sk-kimi-*` 到 `kimi-k2` credits 接口
-- `scripts/kimi_subscription_probe.sh`：测试 `GetSubscription` 并解析套餐名（支持离线解析 JSON）
+VibeBar is a lightweight native macOS menubar app for tracking coding subscription usage across Kimi and Codex. Instead of repeatedly checking dashboards, you can glance at remaining quota, reset windows, and current plan right from the menu bar.
 
-示例：
+### Product Preview
 
-```bash
-KIMI_AUTH_TOKEN='eyJ...' ./scripts/kimi_probe.sh
-```
+**App Icon**
 
-## 安全说明
+![VibeBar App Icon](Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png)
 
-- 不要把 JWT 或 API Key 提交到仓库。
-- 如截图/日志中暴露过 token，请立即失效并重新登录获取新 token。
+**Menu UI**
 
-或直接使用现成图片导入：
+![VibeBar Menu Preview](Resources/Screenshots/menu-ui.png)
 
-```bash
-./scripts/import_app_icon_from_image.sh /path/to/your-icon.png
-```
+### Why VibeBar
+
+- Subscription limits are getting more complex (`Session`, `5-hour`, `Weekly`).
+- Usage info is fragmented across multiple web consoles.
+- You need always-visible status, not interrupt-driven checks.
+
+### What it does
+
+- Dual provider switch: `Kimi / Codex`.
+- Multi-window quota tracking: `Session`, `Weekly`, `5-hour` windows.
+- Compact countdown format: `Resets in 5d / 3h / 45m`.
+- Plan name display for active subscriptions.
+- Native macOS menu experience with low interruption.
+- Auto refresh plus manual refresh.
+
+### Who it is for
+
+- Power users of Codex / Kimi.
+- Solo builders and small teams using multiple coding models.
+- Developers who optimize work around quota windows.
+
+### Privacy and security
+
+- Local-first data handling and caching.
+- Sensitive credentials rely on macOS Keychain policies.
+- This project is an independent productivity tool, not an official client.
+
+### Status and roadmap
+
+- MVP is functional and actively iterated.
+- Next: more providers, smarter alerts, richer trends, and better distribution flow.
