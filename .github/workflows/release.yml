@@ -23,6 +23,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 准备 Node.js（create-dmg）
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: 解析发布标签
         id: meta
         shell: bash
@@ -97,16 +102,15 @@ jobs:
           mkdir -p dist
           RAW_TAG="${{ steps.meta.outputs.tag }}"
           VERSION="${RAW_TAG#v}"
-          ZIP_NAME="VibeBar-${VERSION}-macOS-universal.zip"
-          SHA_NAME="VibeBar-${VERSION}-macOS-universal.sha256"
+          DMG_NAME="VibeBar-${VERSION}-macOS-universal.dmg"
+          SHA_NAME="VibeBar-${VERSION}-macOS-universal.sha256.txt"
+          APP_PATH="$RUNNER_TEMP/VibeBar.xcarchive/Products/Applications/VibeBar.app"
 
-          ditto -c -k --sequesterRsrc --keepParent \
-            "$RUNNER_TEMP/VibeBar.xcarchive/Products/Applications/VibeBar.app" \
-            "dist/$ZIP_NAME"
+          ./scripts/create_drag_dmg.sh "$APP_PATH" "dist/$DMG_NAME" "VibeBar"
 
-          shasum -a 256 "dist/$ZIP_NAME" > "dist/$SHA_NAME"
+          shasum -a 256 "dist/$DMG_NAME" > "dist/$SHA_NAME"
 
-          echo "zip=dist/$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "dmg=dist/$DMG_NAME" >> "$GITHUB_OUTPUT"
           echo "sha=dist/$SHA_NAME" >> "$GITHUB_OUTPUT"
 
       - name: 创建或更新 GitHub Release
@@ -121,12 +125,12 @@ jobs:
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              "${{ steps.package.outputs.zip }}" \
+              "${{ steps.package.outputs.dmg }}" \
               "${{ steps.package.outputs.sha }}" \
               --clobber
           else
             gh release create "$TAG" \
-              "${{ steps.package.outputs.zip }}" \
+              "${{ steps.package.outputs.dmg }}" \
               "${{ steps.package.outputs.sha }}" \
               --title "$TITLE" \
               --notes "自动构建发布包。"

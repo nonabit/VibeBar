@@ -13,6 +13,13 @@
 - macOS 14.0 or later
 - Universal build: Apple Silicon (arm64) and Intel (x86_64)
 
+## Install
+
+1. Download `VibeBar-<version>-macOS-universal.dmg` from Releases.
+2. Open the DMG window.
+3. Drag `VibeBar.app` into `Applications`.
+4. Launch VibeBar from Applications.
+
 ## What It Does
 
 - Dual provider switch: `Kimi / Codex`

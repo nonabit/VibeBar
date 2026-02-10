@@ -13,6 +13,13 @@
 - macOS 14.0 或更高版本
 - 通用构建（Universal）：支持 Apple Silicon（arm64）与 Intel（x86_64）
 
+## 安装方式
+
+1. 从 Releases 下载 `VibeBar-<version>-macOS-universal.dmg`。
+2. 打开 DMG 窗口。
+3. 将 `VibeBar.app` 拖拽到 `Applications`。
+4. 在应用程序目录中启动 VibeBar。
+
 ## 产品简介
 
 VibeBar 是一个轻量、原生、低干扰的 menubar 工具，用来实时查看 Kimi 与 Codex 的订阅使用状态。你不需要反复打开网页控制台，抬头就能看到当前额度、重置时间和套餐信息。
