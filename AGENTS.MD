@@ -18,9 +18,11 @@
 
 ## 工程与发布约束
 
-- 以 Xcode 工程为构建入口：`VibeBar.xcodeproj`。
+- 以 SwiftPM 为工程真相源：根目录 `Package.swift` 管理 target、依赖和 Swift 语言模式。
+- Xcode 只用于打开 package 后调试、调用编译器和签名相关能力。
+- 以 mise 作为本地工具版本与常用任务入口；Swift toolchain 仍由当前 Xcode 提供。
 - 发布产物为可分发的 `VibeBar.app` 压缩包（zip）及校验文件。
-- 不新增根目录 `Package.swift` / `Package.resolved` 作为发布入口。
+- 不重新引入 `VibeBar.xcodeproj` / `project.yml` 作为发布入口。
 
 ## 变更规范
 

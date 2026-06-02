@@ -1,0 +1,38 @@
+[tools]
+node = "24"
+
+[tasks.resolve]
+description = "解析 SwiftPM 依赖"
+run = "swift package resolve"
+
+[tasks.build]
+description = "编译 SwiftPM debug product"
+run = "swift build"
+
+[tasks."build:release"]
+description = "编译 SwiftPM release product"
+run = "swift build --configuration release --product VibeBar"
+
+[tasks.app]
+description = "生成本地 debug .app"
+run = "./scripts/build_app_bundle.sh --configuration debug --output dist/VibeBar.app"
+
+[tasks."app:release"]
+description = "生成发布用 universal .app"
+run = "./scripts/build_app_bundle.sh --configuration release --universal --output dist/VibeBar.app"
+
+[tasks.run]
+description = "构建并启动本地 app"
+run = "./script/build_and_run.sh"
+
+[tasks.verify]
+description = "构建、启动并验证 VibeBar 进程存在"
+run = "./script/build_and_run.sh --verify"
+
+[tasks.check]
+description = "运行基础提交前检查"
+run = """
+bash -n scripts/build_app_bundle.sh
+bash -n script/build_and_run.sh
+swift build
+"""

@@ -23,21 +23,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 准备 Node.js（create-dmg）
-        uses: actions/setup-node@v4
+      - name: 准备 mise 工具链
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151
         with:
-          node-version: "20"
+          install: true
+          cache: false
 
       - name: 解析发布标签
         id: meta
         shell: bash
+        env:
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
 
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" && -n "${GITHUB_REF_NAME:-}" ]]; then
             TAG="$GITHUB_REF_NAME"
-          elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
-            TAG="${{ github.event.inputs.tag }}"
+          elif [[ -n "${DISPATCH_TAG:-}" ]]; then
+            TAG="$DISPATCH_TAG"
             git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
             git checkout "tags/$TAG"
           else
@@ -81,30 +84,25 @@ jobs:
           xcodebuild -version
           xcrun swift --version
 
-      - name: 构建 macOS Archive
+      - name: 构建 SwiftPM App Bundle
         shell: bash
         run: |
           set -euo pipefail
-          xcodebuild \
-            -project VibeBar.xcodeproj \
-            -scheme VibeBar \
-            -configuration Release \
-            -destination "platform=macOS" \
-            -archivePath "$RUNNER_TEMP/VibeBar.xcarchive" \
-            archive
+          mise run app:release
 
       - name: 打包发布产物
         id: package
         shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
 
           mkdir -p dist
-          RAW_TAG="${{ steps.meta.outputs.tag }}"
-          VERSION="${RAW_TAG#v}"
+          VERSION="${TAG#v}"
           DMG_NAME="VibeBar-${VERSION}-macOS-universal.dmg"
           SHA_NAME="VibeBar-${VERSION}-macOS-universal.sha256.txt"
-          APP_PATH="$RUNNER_TEMP/VibeBar.xcarchive/Products/Applications/VibeBar.app"
+          APP_PATH="dist/VibeBar.app"
 
           ./scripts/create_drag_dmg.sh "$APP_PATH" "dist/$DMG_NAME" "VibeBar"
 
@@ -113,25 +111,62 @@ jobs:
           echo "dmg=dist/$DMG_NAME" >> "$GITHUB_OUTPUT"
           echo "sha=dist/$SHA_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: 生成发布说明（Changelog）
+        id: notes
+        shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+          COMPARE_BASE: ${{ github.server_url }}/${{ github.repository }}/compare
+        run: |
+          set -euo pipefail
+
+          PREV_TAG="$(git tag --sort=-v:refname | grep -Fxv "$TAG" | head -n 1 || true)"
+
+          {
+            echo "## 更新日志"
+            echo
+            if [[ -n "$PREV_TAG" ]]; then
+              echo "- 范围：\`$PREV_TAG...$TAG\`"
+              echo "- 对比：[\`$PREV_TAG...$TAG\`]($COMPARE_BASE/$PREV_TAG...$TAG)"
+              echo
+              echo "### 提交记录"
+              git log --no-merges --pretty='- %s (%h)' "$PREV_TAG..$TAG"
+            else
+              echo "- 首个版本发布"
+              echo
+              echo "### 提交记录"
+              git log --no-merges --pretty='- %s (%h)' "$TAG"
+            fi
+          } > "$NOTES_FILE"
+
+          echo "notes=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
       - name: 创建或更新 GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes }}
+          DMG_PATH: ${{ steps.package.outputs.dmg }}
+          SHA_PATH: ${{ steps.package.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
 
-          TAG="${{ steps.meta.outputs.tag }}"
           TITLE="VibeBar $TAG"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes-file "$NOTES_FILE"
             gh release upload "$TAG" \
-              "${{ steps.package.outputs.dmg }}" \
-              "${{ steps.package.outputs.sha }}" \
+              "$DMG_PATH" \
+              "$SHA_PATH" \
               --clobber
           else
             gh release create "$TAG" \
-              "${{ steps.package.outputs.dmg }}" \
-              "${{ steps.package.outputs.sha }}" \
+              "$DMG_PATH" \
+              "$SHA_PATH" \
               --title "$TITLE" \
-              --notes "自动构建发布包。"
+              --notes-file "$NOTES_FILE"
           fi
