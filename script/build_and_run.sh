@@ -13,6 +13,14 @@ usage() {
   echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
 }
 
+case "$MODE" in
+  run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify) ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
+
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 "$ROOT_DIR/scripts/build_app_bundle.sh" \
@@ -42,9 +50,5 @@ case "$MODE" in
     open_app
     sleep 1
     pgrep -x "$APP_NAME" >/dev/null
-    ;;
-  *)
-    usage
-    exit 2
     ;;
 esac

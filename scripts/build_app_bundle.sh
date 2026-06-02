@@ -111,10 +111,13 @@ chmod +x "$APP_BINARY"
 
 ICONSET_SOURCE="$ROOT_DIR/Resources/Assets.xcassets/AppIcon.appiconset"
 if [[ -d "$ICONSET_SOURCE" ]]; then
-  ICONSET_TMP="$TMP_DIR/AppIcon.iconset"
-  mkdir -p "$ICONSET_TMP"
-  cp "$ICONSET_SOURCE"/icon_*.png "$ICONSET_TMP"/
-  iconutil -c icns "$ICONSET_TMP" -o "$APP_RESOURCES/AppIcon.icns"
+  icons=("$ICONSET_SOURCE"/icon_*.png)
+  if [[ -e "${icons[0]}" ]]; then
+    ICONSET_TMP="$TMP_DIR/AppIcon.iconset"
+    mkdir -p "$ICONSET_TMP"
+    cp "${icons[@]}" "$ICONSET_TMP"/
+    iconutil -c icns "$ICONSET_TMP" -o "$APP_RESOURCES/AppIcon.icns"
+  fi
 fi
 
 SHORT_VERSION="$(plist_value CFBundleShortVersionString)"

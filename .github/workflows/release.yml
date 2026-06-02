@@ -24,20 +24,23 @@ jobs:
           fetch-depth: 0
 
       - name: 准备 mise 工具链
-        uses: jdx/mise-action@v4
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151
         with:
           install: true
+          cache: false
 
       - name: 解析发布标签
         id: meta
         shell: bash
+        env:
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
 
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" && -n "${GITHUB_REF_NAME:-}" ]]; then
             TAG="$GITHUB_REF_NAME"
-          elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
-            TAG="${{ github.event.inputs.tag }}"
+          elif [[ -n "${DISPATCH_TAG:-}" ]]; then
+            TAG="$DISPATCH_TAG"
             git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
             git checkout "tags/$TAG"
           else
@@ -90,12 +93,13 @@ jobs:
       - name: 打包发布产物
         id: package
         shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
 
           mkdir -p dist
-          RAW_TAG="${{ steps.meta.outputs.tag }}"
-          VERSION="${RAW_TAG#v}"
+          VERSION="${TAG#v}"
           DMG_NAME="VibeBar-${VERSION}-macOS-universal.dmg"
           SHA_NAME="VibeBar-${VERSION}-macOS-universal.sha256.txt"
           APP_PATH="dist/VibeBar.app"
@@ -110,13 +114,14 @@ jobs:
       - name: 生成发布说明（Changelog）
         id: notes
         shell: bash
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+          COMPARE_BASE: ${{ github.server_url }}/${{ github.repository }}/compare
         run: |
           set -euo pipefail
 
-          TAG="${{ steps.meta.outputs.tag }}"
           PREV_TAG="$(git tag --sort=-v:refname | grep -Fxv "$TAG" | head -n 1 || true)"
-          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
-          COMPARE_BASE="${{ github.server_url }}/${{ github.repository }}/compare"
 
           {
             echo "## 更新日志"
@@ -140,26 +145,28 @@ jobs:
       - name: 创建或更新 GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes }}
+          DMG_PATH: ${{ steps.package.outputs.dmg }}
+          SHA_PATH: ${{ steps.package.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
 
-          TAG="${{ steps.meta.outputs.tag }}"
           TITLE="VibeBar $TAG"
-          NOTES_FILE="${{ steps.notes.outputs.notes }}"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" \
               --title "$TITLE" \
               --notes-file "$NOTES_FILE"
             gh release upload "$TAG" \
-              "${{ steps.package.outputs.dmg }}" \
-              "${{ steps.package.outputs.sha }}" \
+              "$DMG_PATH" \
+              "$SHA_PATH" \
               --clobber
           else
             gh release create "$TAG" \
-              "${{ steps.package.outputs.dmg }}" \
-              "${{ steps.package.outputs.sha }}" \
+              "$DMG_PATH" \
+              "$SHA_PATH" \
               --title "$TITLE" \
               --notes-file "$NOTES_FILE"
           fi
