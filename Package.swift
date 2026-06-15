@@ -27,6 +27,9 @@ let package = Package(
                 "VibeBarUI",
                 .product(name: "SweetCookieKit", package: "SweetCookieKit"),
             ]),
+        .testTarget(
+            name: "VibeBarUITests",
+            dependencies: ["VibeBarUI"]),
     ],
     swiftLanguageModes: [.v6]
 )

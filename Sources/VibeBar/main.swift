@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import LocalAuthentication
 import Security
 import SweetCookieKit
 import SwiftUI
@@ -10,6 +11,14 @@ private let kimiSubscriptionURL = URL(string: "https://www.kimi.com/apiv2/kimi.g
 private let kimiConsoleURL = URL(string: "https://www.kimi.com/code/console")!
 private let codexUsageURL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
 private let codexUsagePageURL = URL(string: "https://chatgpt.com/codex/settings/usage")!
+private let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+private let claudeUsagePageURL = URL(string: "https://claude.ai/settings/usage")!
+private let claudeWebOrganizationsURL = URL(string: "https://claude.ai/api/organizations")!
+private let claudeWebAPIBaseURL = URL(string: "https://claude.ai/api")!
+private let openUsageClaudeUsageURL = URL(string: "http://127.0.0.1:6736/v1/usage/claude")!
+private let cursorUsageURL = URL(string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage")!
+private let cursorPlanInfoURL = URL(string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo")!
+private let cursorUsagePageURL = URL(string: "https://cursor.com/dashboard/usage")!
 
 enum RefreshInterval: TimeInterval, CaseIterable {
     case oneMinute = 60
@@ -398,6 +407,274 @@ struct CodexUsageResult {
     let planType: String?
 }
 
+struct ClaudeAuthResolution {
+    let accessToken: String
+    let sourceText: String
+    let subscriptionType: String?
+    let rateLimitTier: String?
+}
+
+struct ClaudeWebSessionResolution {
+    let sessionKey: String
+    let sourceText: String
+}
+
+enum ClaudeAPIError: LocalizedError {
+    case missingCredentials
+    case invalidToken
+    case rateLimited(retryAfter: String?)
+    case network(String)
+    case badStatus(Int, String)
+    case parse(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingCredentials:
+            return "未找到 Claude Code 凭据。请先运行 claude auth login。"
+        case .invalidToken:
+            return "Claude token 已失效，请重新登录 Claude Code。"
+        case .rateLimited:
+            return "Claude 用量接口已限流，请稍后再刷新。"
+        case let .network(message):
+            return "Claude 网络请求失败: \(message)"
+        case let .badStatus(code, body):
+            return "Claude 接口返回 HTTP \(code): \(body)"
+        case let .parse(message):
+            return "Claude 解析失败: \(message)"
+        }
+    }
+}
+
+final class ClaudeCredentialsProvider {
+    private struct Envelope: Decodable {
+        let claudeAiOauth: OAuthCredentials?
+    }
+
+    private struct OAuthCredentials: Decodable {
+        let accessToken: String?
+        let subscriptionType: String?
+        let rateLimitTier: String?
+    }
+
+    func resolveCredentials() throws -> ClaudeAuthResolution {
+        guard let data = readClaudeCodeCredentialsFromKeychain() else {
+            throw ClaudeAPIError.missingCredentials
+        }
+
+        let decoder = JSONDecoder()
+        let credentials: OAuthCredentials?
+        if let envelope = try? decoder.decode(Envelope.self, from: data) {
+            credentials = envelope.claudeAiOauth
+        } else {
+            credentials = try? decoder.decode(OAuthCredentials.self, from: data)
+        }
+
+        guard let oauth = credentials,
+              let accessToken = oauth.accessToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !accessToken.isEmpty
+        else {
+            throw ClaudeAPIError.missingCredentials
+        }
+
+        return ClaudeAuthResolution(
+            accessToken: accessToken,
+            sourceText: "钥匙串(Claude Code)",
+            subscriptionType: oauth.subscriptionType,
+            rateLimitTier: oauth.rateLimitTier)
+    }
+
+    private func readClaudeCodeCredentialsFromKeychain() -> Data? {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrLabel: "Claude Code-credentials",
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+            kSecUseAuthenticationContext: context,
+            kSecAttrSynchronizable: kCFBooleanFalse as Any,
+        ]
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecSuccess, let data = item as? Data {
+            return data
+        }
+        return readClaudeCodeCredentialsUsingSecurityCLI()
+    }
+
+    private func readClaudeCodeCredentialsUsingSecurityCLI() -> Data? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-l", "Claude Code-credentials", "-w"]
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            finished.signal()
+        }
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        if finished.wait(timeout: .now() + 5) == .timedOut {
+            process.terminate()
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else { return nil }
+        return output.fileHandleForReading.readDataToEndOfFile()
+    }
+}
+
+final class ClaudeWebSessionProvider {
+    private let cookieClient = BrowserCookieClient()
+
+    func resolveSession() -> ClaudeWebSessionResolution? {
+        let query = BrowserCookieQuery(
+            domains: ["claude.ai"],
+            domainMatch: .suffix,
+            includeExpired: false)
+
+        for browser in Browser.defaultImportOrder {
+            do {
+                let stores = try cookieClient.records(matching: query, in: browser)
+                for store in stores {
+                    let cookies = store.cookies(origin: query.origin)
+                    if let sessionKey = cookies.first(where: { $0.name == "sessionKey" })?.value,
+                       sessionKey.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("sk-ant-")
+                    {
+                        return ClaudeWebSessionResolution(
+                            sessionKey: sessionKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                            sourceText: "浏览器(\(store.label))")
+                    }
+                }
+            } catch {
+                continue
+            }
+        }
+
+        return nil
+    }
+}
+
+struct ClaudeUsageResult {
+    let snapshot: UsageSnapshot
+    let planType: String?
+}
+
+struct CursorAuthResolution {
+    let accessToken: String
+    let sourceText: String
+}
+
+enum CursorAPIError: LocalizedError {
+    case missingCredentials
+    case invalidToken
+    case rateLimited
+    case network(String)
+    case badStatus(Int, String)
+    case parse(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingCredentials:
+            return "未找到 Cursor 凭据。请先登录 Cursor。"
+        case .invalidToken:
+            return "Cursor token 已失效，请重新登录 Cursor。"
+        case .rateLimited:
+            return "Cursor 用量接口已限流，请稍后再刷新。"
+        case let .network(message):
+            return "Cursor 网络请求失败: \(message)"
+        case let .badStatus(code, body):
+            return "Cursor 接口返回 HTTP \(code): \(body)"
+        case let .parse(message):
+            return "Cursor 解析失败: \(message)"
+        }
+    }
+}
+
+final class CursorCredentialsProvider {
+    func resolveCredentials() throws -> CursorAuthResolution {
+        guard let token = readCursorAccessTokenFromKeychain() else {
+            throw CursorAPIError.missingCredentials
+        }
+
+        return CursorAuthResolution(
+            accessToken: token,
+            sourceText: "钥匙串(Cursor)")
+    }
+
+    private func readCursorAccessTokenFromKeychain() -> String? {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrLabel: "cursor-access-token",
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+            kSecUseAuthenticationContext: context,
+            kSecAttrSynchronizable: kCFBooleanFalse as Any,
+        ]
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecSuccess,
+           let data = item as? Data,
+           let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !token.isEmpty
+        {
+            return token
+        }
+        return readCursorAccessTokenUsingSecurityCLI()
+    }
+
+    private func readCursorAccessTokenUsingSecurityCLI() -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-l", "cursor-access-token", "-w"]
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            finished.signal()
+        }
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        if finished.wait(timeout: .now() + 5) == .timedOut {
+            process.terminate()
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let token, !token.isEmpty else { return nil }
+        return token
+    }
+}
+
+struct CursorUsageResult {
+    let snapshot: UsageSnapshot
+    let planName: String?
+}
+
 @MainActor
 final class CodexAPIClient {
     func fetchUsage(with credentials: CodexAuthResolution) async throws -> CodexUsageResult {
@@ -460,6 +737,175 @@ final class CodexAPIClient {
             updatedAt: Date())
 
         return CodexUsageResult(snapshot: snapshot, planType: decoded.planType)
+    }
+}
+
+@MainActor
+final class ClaudeAPIClient {
+    func fetchUsage(with credentials: ClaudeAuthResolution) async throws -> ClaudeUsageResult {
+        var request = URLRequest(url: claudeUsageURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("VibeBar", forHTTPHeaderField: "User-Agent")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw ClaudeAPIError.network(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw ClaudeAPIError.network("无效 HTTP 响应")
+        }
+
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw ClaudeAPIError.invalidToken
+        }
+        if http.statusCode == 429 {
+            throw ClaudeAPIError.rateLimited(retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
+        }
+
+        guard http.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? "<binary>"
+            throw ClaudeAPIError.badStatus(http.statusCode, body)
+        }
+
+        do {
+            return ClaudeUsageResult(
+                snapshot: try ClaudeUsageParser.snapshot(from: data),
+                planType: credentials.subscriptionType)
+        } catch {
+            throw ClaudeAPIError.parse(error.localizedDescription)
+        }
+    }
+}
+
+@MainActor
+final class ClaudeWebAPIClient {
+    func fetchUsage(with session: ClaudeWebSessionResolution) async -> ClaudeUsageResult? {
+        do {
+            let organizationData = try await fetchData(url: claudeWebOrganizationsURL, sessionKey: session.sessionKey)
+            let organization = try ClaudeWebUsageParser.organization(from: organizationData)
+            let usageURL = URL(string: "https://claude.ai/api/organizations/\(organization.id)/usage")!
+            let usageData = try await fetchData(url: usageURL, sessionKey: session.sessionKey)
+            return ClaudeUsageResult(
+                snapshot: try ClaudeWebUsageParser.snapshot(from: usageData),
+                planType: nil)
+        } catch {
+            return nil
+        }
+    }
+
+    private func fetchData(url: URL, sessionKey: String) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.setValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("VibeBar", forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw ClaudeAPIError.network("Claude Web API 无可用响应")
+        }
+        return data
+    }
+}
+
+@MainActor
+final class OpenUsageLocalAPIClient {
+    func fetchClaudeUsage() async -> ClaudeUsageResult? {
+        var request = URLRequest(url: openUsageClaudeUsageURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 2
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("VibeBar", forHTTPHeaderField: "User-Agent")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return nil
+            }
+
+            let parsed = try OpenUsageSnapshotParser.claudeUsage(from: data)
+            return ClaudeUsageResult(snapshot: parsed.snapshot, planType: parsed.planType)
+        } catch {
+            return nil
+        }
+    }
+}
+
+@MainActor
+final class CursorAPIClient {
+    func fetchUsage(with credentials: CursorAuthResolution) async throws -> CursorUsageResult {
+        var request = URLRequest(url: cursorUsageURL)
+        applyCursorHeaders(&request, credentials: credentials)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw CursorAPIError.network(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw CursorAPIError.network("无效 HTTP 响应")
+        }
+
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw CursorAPIError.invalidToken
+        }
+        if http.statusCode == 429 {
+            throw CursorAPIError.rateLimited
+        }
+
+        guard http.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? "<binary>"
+            throw CursorAPIError.badStatus(http.statusCode, body)
+        }
+
+        let snapshot: UsageSnapshot
+        do {
+            snapshot = try CursorUsageParser.snapshot(from: data)
+        } catch {
+            throw CursorAPIError.parse(error.localizedDescription)
+        }
+
+        let planName = await fetchPlanName(with: credentials)
+        return CursorUsageResult(snapshot: snapshot, planName: planName)
+    }
+
+    private func fetchPlanName(with credentials: CursorAuthResolution) async -> String? {
+        var request = URLRequest(url: cursorPlanInfoURL)
+        applyCursorHeaders(&request, credentials: credentials)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return nil
+            }
+            return try CursorUsageParser.planName(from: data)
+        } catch {
+            return nil
+        }
+    }
+
+    private func applyCursorHeaders(_ request: inout URLRequest, credentials: CursorAuthResolution) {
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.httpBody = Data("{}".utf8)
+        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+        request.setValue("VibeBar", forHTTPHeaderField: "User-Agent")
     }
 }
 
@@ -875,6 +1321,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let kimiAPIClient = KimiAPIClient()
     private let codexCredentialsProvider = CodexCredentialsProvider()
     private let codexAPIClient = CodexAPIClient()
+    private let claudeCredentialsProvider = ClaudeCredentialsProvider()
+    private let claudeAPIClient = ClaudeAPIClient()
+    private let claudeWebSessionProvider = ClaudeWebSessionProvider()
+    private let claudeWebAPIClient = ClaudeWebAPIClient()
+    private let openUsageLocalAPIClient = OpenUsageLocalAPIClient()
+    private let cursorCredentialsProvider = CursorCredentialsProvider()
+    private let cursorAPIClient = CursorAPIClient()
 
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
@@ -897,6 +1350,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var codexTokenSourceText: String = "-"
     private var codexPlanText: String?
     private var cachedCodexCredentials: CodexAuthResolution?
+
+    private var claudeSnapshot: UsageSnapshot?
+    private var claudeError: String?
+    private var claudeTokenSourceText: String = "-"
+    private var claudePlanText: String?
+    private var cachedClaudeCredentials: ClaudeAuthResolution?
+    private var cachedClaudeUsageResult: ClaudeUsageResult?
+    private var claudeUsageRefreshPolicy = UsageRefreshPolicy()
+
+    private var cursorSnapshot: UsageSnapshot?
+    private var cursorError: String?
+    private var cursorTokenSourceText: String = "-"
+    private var cursorPlanText: String?
+    private var cachedCursorCredentials: CursorAuthResolution?
 
     private var refreshInterval: RefreshInterval = .fiveMinutes
 
@@ -939,6 +1406,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await loadKimiUsage()
         case .codex:
             await loadCodexUsage()
+        case .claude:
+            await loadClaudeUsage()
+        case .cursor:
+            await loadCursorUsage()
         }
     }
 
@@ -1019,6 +1490,162 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func loadClaudeUsage() async {
+        if let result = await openUsageLocalAPIClient.fetchClaudeUsage() {
+            cachedClaudeUsageResult = result
+            claudeUsageRefreshPolicy.recordSuccess(at: Date())
+            claudeTokenSourceText = "OpenUsage local API"
+            applyClaudeUsageResult(result, credentials: nil, staleMessage: nil)
+            if selectedProvider == .claude {
+                updateTitle()
+                rebuildMenu()
+            }
+            return
+        }
+
+        if let webSession = claudeWebSessionProvider.resolveSession(),
+           let result = await claudeWebAPIClient.fetchUsage(with: webSession)
+        {
+            cachedClaudeUsageResult = result
+            claudeUsageRefreshPolicy.recordSuccess(at: Date())
+            claudeTokenSourceText = "Claude Web \(webSession.sourceText)"
+            applyClaudeUsageResult(result, credentials: nil, staleMessage: nil)
+            if selectedProvider == .claude {
+                updateTitle()
+                rebuildMenu()
+            }
+            return
+        }
+
+        do {
+            let resolved: ClaudeAuthResolution
+            if let creds = cachedClaudeCredentials {
+                resolved = creds
+            } else {
+                let creds = try claudeCredentialsProvider.resolveCredentials()
+                cachedClaudeCredentials = creds
+                resolved = creds
+            }
+            claudeTokenSourceText = resolved.sourceText
+
+            do {
+                try await loadClaudeUsage(with: resolved)
+            } catch ClaudeAPIError.invalidToken {
+                cachedClaudeCredentials = nil
+                let refreshed = try claudeCredentialsProvider.resolveCredentials()
+                cachedClaudeCredentials = refreshed
+                claudeTokenSourceText = refreshed.sourceText
+                try await loadClaudeUsage(with: refreshed)
+            }
+        } catch {
+            claudeError = error.localizedDescription
+        }
+
+        if selectedProvider == .claude {
+            updateTitle()
+            rebuildMenu()
+        }
+    }
+
+    private func loadClaudeUsage(with credentials: ClaudeAuthResolution) async throws {
+        let now = Date()
+        if let cachedClaudeUsageResult,
+           let skipReason = claudeUsageRefreshPolicy.skipReason(at: now, hasCachedSnapshot: true)
+        {
+            applyClaudeUsageResult(
+                cachedClaudeUsageResult,
+                credentials: credentials,
+                staleMessage: staleClaudeUsageMessage(for: skipReason, now: now))
+            return
+        }
+
+        do {
+            let result = try await claudeAPIClient.fetchUsage(with: credentials)
+            cachedClaudeUsageResult = result
+            claudeUsageRefreshPolicy.recordSuccess(at: Date())
+            applyClaudeUsageResult(result, credentials: credentials, staleMessage: nil)
+        } catch ClaudeAPIError.rateLimited(let retryAfter) {
+            let limitedAt = Date()
+            let retryAt = claudeUsageRefreshPolicy.recordRateLimit(retryAfterHeader: retryAfter, at: limitedAt)
+            if let cachedClaudeUsageResult {
+                applyClaudeUsageResult(
+                    cachedClaudeUsageResult,
+                    credentials: credentials,
+                    staleMessage: "Claude 用量接口限流，显示缓存数据；约 \(durationText(until: retryAt, from: limitedAt)) 后重试。")
+                return
+            }
+            throw ClaudeAPIError.rateLimited(retryAfter: retryAfter)
+        }
+    }
+
+    private func applyClaudeUsageResult(
+        _ result: ClaudeUsageResult,
+        credentials: ClaudeAuthResolution?,
+        staleMessage: String?)
+    {
+        claudeSnapshot = result.snapshot
+        claudePlanText = formatPlanText(result.planType ?? credentials?.rateLimitTier)
+        claudeError = staleMessage
+    }
+
+    private func staleClaudeUsageMessage(for reason: UsageRefreshSkipReason, now: Date) -> String? {
+        switch reason {
+        case .minimumInterval:
+            return nil
+        case .rateLimited(let retryAt):
+            return "Claude 用量接口限流，显示缓存数据；约 \(durationText(until: retryAt, from: now)) 后重试。"
+        }
+    }
+
+    private func durationText(until date: Date, from now: Date = Date()) -> String {
+        let seconds = max(0, Int(ceil(date.timeIntervalSince(now))))
+        if seconds == 0 {
+            return "现在"
+        }
+        if seconds < 60 {
+            return "\(seconds) 秒"
+        }
+        let minutes = Int(ceil(Double(seconds) / 60.0))
+        return "\(minutes) 分钟"
+    }
+
+    private func loadCursorUsage() async {
+        do {
+            let resolved: CursorAuthResolution
+            if let creds = cachedCursorCredentials {
+                resolved = creds
+            } else {
+                let creds = try cursorCredentialsProvider.resolveCredentials()
+                cachedCursorCredentials = creds
+                resolved = creds
+            }
+            cursorTokenSourceText = resolved.sourceText
+
+            do {
+                let result = try await cursorAPIClient.fetchUsage(with: resolved)
+                cursorSnapshot = result.snapshot
+                cursorPlanText = formatPlanText(result.planName)
+                cursorError = nil
+            } catch CursorAPIError.invalidToken {
+                cachedCursorCredentials = nil
+                let refreshed = try cursorCredentialsProvider.resolveCredentials()
+                cachedCursorCredentials = refreshed
+                cursorTokenSourceText = refreshed.sourceText
+                let result = try await cursorAPIClient.fetchUsage(with: refreshed)
+                cursorSnapshot = result.snapshot
+                cursorPlanText = formatPlanText(result.planName)
+                cursorError = nil
+            }
+        } catch {
+            cursorError = error.localizedDescription
+        }
+
+        if selectedProvider == .cursor {
+            updateTitle()
+            rebuildMenu()
+        }
+    }
+
     private func updateTitle() {
         let snapshot = self.activeSnapshot
         statusItem.button?.title = ""
@@ -1037,7 +1664,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshItem.target = self
         menu.addItem(refreshItem)
 
-        let openTitle = selectedProvider == .kimi ? "打开 Kimi 控制台" : "打开 Codex 用量页"
+        let openTitle: String
+        switch selectedProvider {
+        case .kimi:
+            openTitle = "打开 Kimi 控制台"
+        case .codex:
+            openTitle = "打开 Codex 用量页"
+        case .claude:
+            openTitle = "打开 Claude 用量页"
+        case .cursor:
+            openTitle = "打开 Cursor 用量页"
+        }
         let openItem = NSMenuItem(title: openTitle, action: #selector(openProviderConsole), keyEquivalent: "o")
         openItem.target = self
         menu.addItem(openItem)
@@ -1066,10 +1703,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openProviderConsole() {
-        if selectedProvider == .kimi {
+        switch selectedProvider {
+        case .kimi:
             NSWorkspace.shared.open(kimiConsoleURL)
-        } else {
+        case .codex:
             NSWorkspace.shared.open(codexUsagePageURL)
+        case .claude:
+            NSWorkspace.shared.open(claudeUsagePageURL)
+        case .cursor:
+            NSWorkspace.shared.open(cursorUsagePageURL)
         }
     }
 
@@ -1117,10 +1759,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.switchProvider(provider)
                 }
             },
-            providerTitle: selectedProvider == .kimi ? "Kimi" : "Codex",
-            planText: selectedProvider == .kimi ? kimiPlanText : codexPlanText,
-            primaryTitle: "Session",
-            secondaryTitle: "Weekly",
+            providerTitle: activeProviderTitle,
+            planText: activePlanText,
+            primaryTitle: activePrimaryTitle,
+            secondaryTitle: activeSecondaryTitle,
             snapshot: snapshot,
             tokenSourceText: activeTokenSourceText,
             updatedText: snapshot.map { timeText($0.updatedAt) } ?? "-",
@@ -1177,15 +1819,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var activeSnapshot: UsageSnapshot? {
-        selectedProvider == .kimi ? kimiSnapshot : codexSnapshot
+        switch selectedProvider {
+        case .kimi:
+            kimiSnapshot
+        case .codex:
+            codexSnapshot
+        case .claude:
+            claudeSnapshot
+        case .cursor:
+            cursorSnapshot
+        }
     }
 
     private var activeError: String? {
-        selectedProvider == .kimi ? kimiError : codexError
+        switch selectedProvider {
+        case .kimi:
+            kimiError
+        case .codex:
+            codexError
+        case .claude:
+            claudeError
+        case .cursor:
+            cursorError
+        }
     }
 
     private var activeTokenSourceText: String {
-        selectedProvider == .kimi ? kimiTokenSourceText : codexTokenSourceText
+        switch selectedProvider {
+        case .kimi:
+            kimiTokenSourceText
+        case .codex:
+            codexTokenSourceText
+        case .claude:
+            claudeTokenSourceText
+        case .cursor:
+            cursorTokenSourceText
+        }
+    }
+
+    private var activeProviderTitle: String {
+        switch selectedProvider {
+        case .kimi:
+            "Kimi"
+        case .codex:
+            "Codex"
+        case .claude:
+            "Claude"
+        case .cursor:
+            "Cursor"
+        }
+    }
+
+    private var activePlanText: String? {
+        switch selectedProvider {
+        case .kimi:
+            kimiPlanText
+        case .codex:
+            codexPlanText
+        case .claude:
+            claudePlanText
+        case .cursor:
+            cursorPlanText
+        }
+    }
+
+    private var activePrimaryTitle: String {
+        switch selectedProvider {
+        case .cursor:
+            "Total"
+        case .kimi, .codex, .claude:
+            "Session"
+        }
+    }
+
+    private var activeSecondaryTitle: String {
+        switch selectedProvider {
+        case .cursor:
+            "API"
+        case .kimi, .codex, .claude:
+            "Weekly"
+        }
     }
 
     private func makeRefreshIntervalSubmenu() -> NSMenu {
@@ -1325,15 +2038,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeStatusTooltip(snapshot: UsageSnapshot?) -> String {
-        let providerName = selectedProvider == .kimi ? "Kimi" : "Codex"
+        let providerName = activeProviderTitle
         guard let snapshot else {
             return "\(providerName)：暂无可用数据"
         }
-        let session = "\(snapshot.weeklyRemaining)/\(snapshot.weeklyLimit)"
+        let primary = "\(snapshot.weeklyRemaining)/\(snapshot.weeklyLimit)"
         if let weeklyRemain = snapshot.rateLimitRemaining, let weeklyLimit = snapshot.rateLimitLimit {
-            return "\(providerName) Session \(session) · Weekly \(weeklyRemain)/\(weeklyLimit)"
+            return "\(providerName) \(activePrimaryTitle) \(primary) · \(activeSecondaryTitle) \(weeklyRemain)/\(weeklyLimit)"
         }
-        return "\(providerName) Session \(session)"
+        return "\(providerName) \(activePrimaryTitle) \(primary)"
     }
 }
 

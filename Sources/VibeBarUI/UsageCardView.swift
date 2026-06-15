@@ -3,6 +3,8 @@ import SwiftUI
 public enum ProviderTab: String, CaseIterable, Hashable {
     case kimi = "Kimi"
     case codex = "Codex"
+    case claude = "Claude"
+    case cursor = "Cursor"
 }
 
 private struct ThinProgressBar: View {
@@ -180,6 +182,13 @@ public struct UsageCardView: View {
                         remaining: snapshot.rateLimitRemaining ?? max(0, rateLimit - rateUsed),
                         resetText: self.rateResetText)
                 }
+
+                if let lastError = self.lastError, !lastError.isEmpty {
+                    Text(lastError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .lineLimit(3)
+                }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("No usage data yet")
@@ -190,7 +199,7 @@ public struct UsageCardView: View {
                             .foregroundStyle(.red)
                             .lineLimit(3)
                     }
-                    Text(self.selectedProvider == .kimi ? "Sign in to Kimi in your browser, then click Refresh Now." : "Run codex login first, then click Refresh Now.")
+                    Text(self.emptyStateHelpText)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -202,9 +211,9 @@ public struct UsageCardView: View {
             HStack {
                 Text("Source: \(self.tokenSourceText)")
                 Spacer()
-                if let lastError = self.lastError, !lastError.isEmpty, self.snapshot == nil {
-                    Text("Error")
-                        .foregroundStyle(.red)
+                if let lastError = self.lastError, !lastError.isEmpty {
+                    Text(self.snapshot == nil ? "Error" : "Stale")
+                        .foregroundStyle(self.snapshot == nil ? .red : .orange)
                 }
             }
             .font(.system(size: 11))
@@ -213,6 +222,19 @@ public struct UsageCardView: View {
         .padding(.horizontal, self.menuEdgeInset)
         .padding(.vertical, 10)
         .frame(width: 320, alignment: .leading)
+    }
+
+    private var emptyStateHelpText: String {
+        switch self.selectedProvider {
+        case .kimi:
+            return "Sign in to Kimi in your browser, then click Refresh Now."
+        case .codex:
+            return "Run codex login first, then click Refresh Now."
+        case .claude:
+            return "Run claude auth login first, then click Refresh Now."
+        case .cursor:
+            return "Sign in to Cursor first, then click Refresh Now."
+        }
     }
 
     private var tabBar: some View {
