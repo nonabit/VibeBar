@@ -29,3 +29,17 @@
 - 优先做最小改动，避免引入无关重构。
 - 提交前至少保证本地可构建（Release 或等价验证）。
 - 提交信息清晰描述目的与范围。
+
+## Agent skills
+
+### Issue tracker
+
+本仓库使用 local markdown 作为 issue tracker，issues 和 PRD 写入 `.scratch/<feature-slug>/`。参见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+本仓库使用 mattpocock/skills 默认五类 triage 标签：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。参见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+本仓库按 single-context 布局消费领域文档：根目录 `CONTEXT.md` 与 `docs/adr/`。参见 `docs/agents/domain.md`。
