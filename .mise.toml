@@ -21,7 +21,7 @@ run = "./scripts/build_app_bundle.sh --configuration debug --output dist/VibeBar
 description = "生成发布用 universal .app"
 run = "./scripts/build_app_bundle.sh --configuration release --universal --output dist/VibeBar.app"
 
-[tasks.run]
+[tasks.dev]
 description = "构建并启动本地 app"
 run = "./script/build_and_run.sh"
 

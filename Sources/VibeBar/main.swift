@@ -15,7 +15,6 @@ private let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/us
 private let claudeUsagePageURL = URL(string: "https://claude.ai/settings/usage")!
 private let claudeWebOrganizationsURL = URL(string: "https://claude.ai/api/organizations")!
 private let claudeWebAPIBaseURL = URL(string: "https://claude.ai/api")!
-private let openUsageClaudeUsageURL = URL(string: "http://127.0.0.1:6736/v1/usage/claude")!
 private let cursorUsageURL = URL(string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage")!
 private let cursorPlanInfoURL = URL(string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo")!
 private let cursorUsagePageURL = URL(string: "https://cursor.com/dashboard/usage")!
@@ -446,6 +445,11 @@ enum ClaudeAPIError: LocalizedError {
 }
 
 final class ClaudeCredentialsProvider {
+    private enum KeychainReadResult {
+        case success(Data)
+        case failure(OSStatus)
+    }
+
     private struct Envelope: Decodable {
         let claudeAiOauth: OAuthCredentials?
     }
@@ -484,24 +488,47 @@ final class ClaudeCredentialsProvider {
     }
 
     private func readClaudeCodeCredentialsFromKeychain() -> Data? {
-        let context = LAContext()
-        context.interactionNotAllowed = true
+        switch readClaudeCodeCredentialsFromKeychain(allowsInteraction: false) {
+        case let .success(data):
+            return data
+        case let .failure(status):
+            for step in KeychainCredentialFallbackPolicy.nextSteps(after: status) {
+                switch step {
+                case .promptForDirectAppAccess:
+                    if case let .success(data) = readClaudeCodeCredentialsFromKeychain(allowsInteraction: true) {
+                        return data
+                    }
+                case .securityCLI:
+                    if let data = readClaudeCodeCredentialsUsingSecurityCLI() {
+                        return data
+                    }
+                }
+            }
+            return nil
+        }
+    }
 
-        let query: [CFString: Any] = [
+    private func readClaudeCodeCredentialsFromKeychain(allowsInteraction: Bool) -> KeychainReadResult {
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrLabel: "Claude Code-credentials",
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitOne,
-            kSecUseAuthenticationContext: context,
             kSecAttrSynchronizable: kCFBooleanFalse as Any,
         ]
+
+        if !allowsInteraction {
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext] = context
+        }
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecSuccess, let data = item as? Data {
-            return data
+            return .success(data)
         }
-        return readClaudeCodeCredentialsUsingSecurityCLI()
+        return .failure(status)
     }
 
     private func readClaudeCodeCredentialsUsingSecurityCLI() -> Data? {
@@ -602,6 +629,11 @@ enum CursorAPIError: LocalizedError {
 }
 
 final class CursorCredentialsProvider {
+    private enum KeychainReadResult {
+        case success(String)
+        case failure(OSStatus)
+    }
+
     func resolveCredentials() throws -> CursorAuthResolution {
         guard let token = readCursorAccessTokenFromKeychain() else {
             throw CursorAPIError.missingCredentials
@@ -613,17 +645,40 @@ final class CursorCredentialsProvider {
     }
 
     private func readCursorAccessTokenFromKeychain() -> String? {
-        let context = LAContext()
-        context.interactionNotAllowed = true
+        switch readCursorAccessTokenFromKeychain(allowsInteraction: false) {
+        case let .success(token):
+            return token
+        case let .failure(status):
+            for step in KeychainCredentialFallbackPolicy.nextSteps(after: status) {
+                switch step {
+                case .promptForDirectAppAccess:
+                    if case let .success(token) = readCursorAccessTokenFromKeychain(allowsInteraction: true) {
+                        return token
+                    }
+                case .securityCLI:
+                    if let token = readCursorAccessTokenUsingSecurityCLI() {
+                        return token
+                    }
+                }
+            }
+            return nil
+        }
+    }
 
-        let query: [CFString: Any] = [
+    private func readCursorAccessTokenFromKeychain(allowsInteraction: Bool) -> KeychainReadResult {
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrLabel: "cursor-access-token",
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitOne,
-            kSecUseAuthenticationContext: context,
             kSecAttrSynchronizable: kCFBooleanFalse as Any,
         ]
+
+        if !allowsInteraction {
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext] = context
+        }
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
@@ -632,9 +687,9 @@ final class CursorCredentialsProvider {
            let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !token.isEmpty
         {
-            return token
+            return .success(token)
         }
-        return readCursorAccessTokenUsingSecurityCLI()
+        return .failure(status)
     }
 
     private func readCursorAccessTokenUsingSecurityCLI() -> String? {
@@ -673,6 +728,18 @@ final class CursorCredentialsProvider {
 struct CursorUsageResult {
     let snapshot: UsageSnapshot
     let planName: String?
+}
+
+private enum ClaudeWebUsageLoadResult {
+    case loaded
+    case unavailable
+    case failed(String)
+}
+
+private enum ClaudeCLIUsageLoadResult {
+    case loaded
+    case unavailable
+    case failed(String)
 }
 
 @MainActor
@@ -788,7 +855,7 @@ final class ClaudeAPIClient {
 
 @MainActor
 final class ClaudeWebAPIClient {
-    func fetchUsage(with session: ClaudeWebSessionResolution) async -> ClaudeUsageResult? {
+    func fetchUsage(with session: ClaudeWebSessionResolution) async throws -> ClaudeUsageResult {
         do {
             let organizationData = try await fetchData(url: claudeWebOrganizationsURL, sessionKey: session.sessionKey)
             let organization = try ClaudeWebUsageParser.organization(from: organizationData)
@@ -797,8 +864,10 @@ final class ClaudeWebAPIClient {
             return ClaudeUsageResult(
                 snapshot: try ClaudeWebUsageParser.snapshot(from: usageData),
                 planType: nil)
+        } catch let error as ClaudeWebUsageFetchError {
+            throw error
         } catch {
-            return nil
+            throw ClaudeWebUsageFetchError.parse(error.localizedDescription)
         }
     }
 
@@ -810,34 +879,281 @@ final class ClaudeWebAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("VibeBar", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw ClaudeAPIError.network("Claude Web API 无可用响应")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw ClaudeWebUsageFetchError.network(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw ClaudeWebUsageFetchError.network("无效 HTTP 响应")
+        }
+        guard http.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw ClaudeWebUsageFetchError.badStatus(
+                http.statusCode,
+                isCloudflareChallenge: body.localizedCaseInsensitiveContains("Just a moment"))
         }
         return data
     }
 }
 
-@MainActor
-final class OpenUsageLocalAPIClient {
-    func fetchClaudeUsage() async -> ClaudeUsageResult? {
-        var request = URLRequest(url: openUsageClaudeUsageURL)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 2
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("VibeBar", forHTTPHeaderField: "User-Agent")
+private enum ClaudeCLIUsageClientError: LocalizedError {
+    case missingBinary
+    case probeDirectory(String)
+    case launch(String)
+    case timeout
+    case parse(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingBinary:
+            return "未找到 claude CLI。"
+        case let .probeDirectory(message):
+            return "无法创建 Claude CLI 探测目录：\(message)"
+        case let .launch(message):
+            return "无法启动 Claude CLI：\(message)"
+        case .timeout:
+            return "Claude CLI /usage 超时。"
+        case let .parse(message):
+            return "Claude CLI /usage 解析失败：\(message)"
+        }
+    }
+}
+
+private final class LockedProcessOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ newData: Data) {
+        lock.lock()
+        data.append(newData)
+        lock.unlock()
+    }
+
+    func string() -> String {
+        lock.lock()
+        let snapshot = data
+        lock.unlock()
+        return String(data: snapshot, encoding: .utf8) ?? ""
+    }
+}
+
+final class ClaudeCLIUsageClient: @unchecked Sendable {
+    private let timeoutSeconds: TimeInterval
+
+    init(timeoutSeconds: TimeInterval = 20) {
+        self.timeoutSeconds = timeoutSeconds
+    }
+
+    func isAvailable() -> Bool {
+        resolveClaudeBinary() != nil
+    }
+
+    func fetchUsage() async throws -> ClaudeUsageResult {
+        guard let binaryURL = resolveClaudeBinary() else {
+            throw ClaudeCLIUsageClientError.missingBinary
+        }
+
+        let output = try await captureUsageOutput(binaryURL: binaryURL)
+        do {
+            return ClaudeUsageResult(
+                snapshot: try ClaudeCLIUsageParser.snapshot(from: output),
+                planType: nil)
+        } catch {
+            throw ClaudeCLIUsageClientError.parse(error.localizedDescription)
+        }
+    }
+
+    private func captureUsageOutput(binaryURL: URL) async throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        process.arguments = [
+            "-q",
+            "/dev/null",
+            binaryURL.path,
+            "--tools",
+            "",
+            "--permission-mode",
+            "dontAsk",
+            "--no-chrome",
+        ]
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                return nil
+            process.currentDirectoryURL = try probeDirectoryURL()
+        } catch {
+            throw ClaudeCLIUsageClientError.probeDirectory(error.localizedDescription)
+        }
+
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+        let output = LockedProcessOutput()
+
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                output.append(data)
+            }
+        }
+
+        do {
+            try process.run()
+        } catch {
+            outputPipe.fileHandleForReading.readabilityHandler = nil
+            throw ClaudeCLIUsageClientError.launch(error.localizedDescription)
+        }
+
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        var sentUsageCommand = false
+        var nextEnterAt = Date().addingTimeInterval(2.5)
+        var lastParseError: Error?
+
+        while Date() < deadline {
+            let now = Date()
+            if !sentUsageCommand, now >= nextEnterAt {
+                write("/usage\r", to: inputPipe)
+                sentUsageCommand = true
+                nextEnterAt = now.addingTimeInterval(0.8)
+            } else if sentUsageCommand, now >= nextEnterAt {
+                write("\r", to: inputPipe)
+                nextEnterAt = now.addingTimeInterval(0.8)
             }
 
-            let parsed = try OpenUsageSnapshotParser.claudeUsage(from: data)
-            return ClaudeUsageResult(snapshot: parsed.snapshot, planType: parsed.planType)
-        } catch {
-            return nil
+            let currentOutput = output.string()
+            do {
+                _ = try ClaudeCLIUsageParser.snapshot(from: currentOutput)
+                await stopProbe(
+                    process: process,
+                    inputPipe: inputPipe,
+                    outputPipe: outputPipe,
+                    sendExit: true)
+                return currentOutput
+            } catch {
+                lastParseError = error
+            }
+
+            if !process.isRunning {
+                break
+            }
+
+            try? await Task.sleep(nanoseconds: 250_000_000)
         }
+
+        let exitedBeforeDeadline = !process.isRunning
+        let finalOutput = output.string()
+        await stopProbe(
+            process: process,
+            inputPipe: inputPipe,
+            outputPipe: outputPipe,
+            sendExit: false)
+
+        if (try? ClaudeCLIUsageParser.snapshot(from: finalOutput)) != nil {
+            return finalOutput
+        }
+        if exitedBeforeDeadline, let lastParseError {
+            throw ClaudeCLIUsageClientError.parse(lastParseError.localizedDescription)
+        }
+        throw ClaudeCLIUsageClientError.timeout
+    }
+
+    private func stopProbe(
+        process: Process,
+        inputPipe: Pipe,
+        outputPipe: Pipe,
+        sendExit: Bool) async
+    {
+        if sendExit, process.isRunning {
+            write("/exit\r", to: inputPipe)
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+
+        if process.isRunning {
+            process.terminate()
+        }
+
+        for _ in 0..<10 where process.isRunning {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        outputPipe.fileHandleForReading.readabilityHandler = nil
+        try? inputPipe.fileHandleForWriting.close()
+    }
+
+    private func write(_ text: String, to pipe: Pipe) {
+        do {
+            try pipe.fileHandleForWriting.write(contentsOf: Data(text.utf8))
+        } catch {
+            // The probe may have exited between polling ticks.
+        }
+    }
+
+    private func probeDirectoryURL() throws -> URL {
+        let baseURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Application Support", isDirectory: true)
+        let probeURL = baseURL
+            .appendingPathComponent("VibeBar", isDirectory: true)
+            .appendingPathComponent("ClaudeProbe", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: probeURL,
+            withIntermediateDirectories: true)
+        return probeURL
+    }
+
+    private func resolveClaudeBinary() -> URL? {
+        var candidates: [String] = []
+        if let override = ProcessInfo.processInfo.environment["CLAUDE_BIN"] {
+            candidates.append(override)
+        }
+
+        let environmentPath = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        for directory in environmentPath.split(separator: ":") {
+            candidates.append(String(directory) + "/claude")
+        }
+
+        let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+        candidates.append(contentsOf: [
+            "\(homePath)/.local/bin/claude",
+            "\(homePath)/.claude/local/claude",
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude",
+            "/usr/bin/claude",
+        ])
+
+        var seen = Set<String>()
+        for candidate in candidates {
+            let path = expandedPath(candidate)
+            guard seen.insert(path).inserted else { continue }
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+               !isDirectory.boolValue,
+               FileManager.default.isExecutableFile(atPath: path)
+            {
+                return URL(fileURLWithPath: path)
+            }
+        }
+
+        return nil
+    }
+
+    private func expandedPath(_ path: String) -> String {
+        if path == "~" {
+            return FileManager.default.homeDirectoryForCurrentUser.path
+        }
+        if path.hasPrefix("~/") {
+            return FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(String(path.dropFirst(2)))
+                .path
+        }
+        return path
     }
 }
 
@@ -1323,9 +1639,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let codexAPIClient = CodexAPIClient()
     private let claudeCredentialsProvider = ClaudeCredentialsProvider()
     private let claudeAPIClient = ClaudeAPIClient()
+    private let claudeCLIUsageClient = ClaudeCLIUsageClient()
     private let claudeWebSessionProvider = ClaudeWebSessionProvider()
     private let claudeWebAPIClient = ClaudeWebAPIClient()
-    private let openUsageLocalAPIClient = OpenUsageLocalAPIClient()
     private let cursorCredentialsProvider = CursorCredentialsProvider()
     private let cursorAPIClient = CursorAPIClient()
 
@@ -1491,32 +1807,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func loadClaudeUsage() async {
-        if let result = await openUsageLocalAPIClient.fetchClaudeUsage() {
-            cachedClaudeUsageResult = result
-            claudeUsageRefreshPolicy.recordSuccess(at: Date())
-            claudeTokenSourceText = "OpenUsage local API"
-            applyClaudeUsageResult(result, credentials: nil, staleMessage: nil)
-            if selectedProvider == .claude {
-                updateTitle()
-                rebuildMenu()
-            }
-            return
-        }
-
-        if let webSession = claudeWebSessionProvider.resolveSession(),
-           let result = await claudeWebAPIClient.fetchUsage(with: webSession)
-        {
-            cachedClaudeUsageResult = result
-            claudeUsageRefreshPolicy.recordSuccess(at: Date())
-            claudeTokenSourceText = "Claude Web \(webSession.sourceText)"
-            applyClaudeUsageResult(result, credentials: nil, staleMessage: nil)
-            if selectedProvider == .claude {
-                updateTitle()
-                rebuildMenu()
-            }
-            return
-        }
-
         do {
             let resolved: ClaudeAuthResolution
             if let creds = cachedClaudeCredentials {
@@ -1537,8 +1827,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 claudeTokenSourceText = refreshed.sourceText
                 try await loadClaudeUsage(with: refreshed)
             }
+        } catch ClaudeAPIError.rateLimited(let retryAfter) {
+            claudeError = ClaudeAPIError.rateLimited(retryAfter: retryAfter).localizedDescription
         } catch {
-            claudeError = error.localizedDescription
+            if !(await applyClaudeFallback(
+                after: .oauthUnavailable,
+                credentials: cachedClaudeCredentials,
+                retryText: nil,
+                initialFallbackFailures: ["Claude OAuth 失败：\(error.localizedDescription)"]))
+            {
+                claudeError = error.localizedDescription
+            }
         }
 
         if selectedProvider == .claude {
@@ -1547,11 +1846,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func loadClaudeCLIUsageIfAvailable() async -> ClaudeCLIUsageLoadResult {
+        guard claudeCLIUsageClient.isAvailable() else {
+            return .unavailable
+        }
+
+        do {
+            let result = try await claudeCLIUsageClient.fetchUsage()
+            cachedClaudeUsageResult = result
+            claudeUsageRefreshPolicy.recordSuccess(at: Date())
+            claudeTokenSourceText = "Claude CLI (/usage)"
+            applyClaudeUsageResult(result, credentials: nil, staleMessage: nil)
+            return .loaded
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private func loadClaudeWebUsage(with webSession: ClaudeWebSessionResolution) async -> ClaudeWebUsageLoadResult {
+        do {
+            let result = try await claudeWebAPIClient.fetchUsage(with: webSession)
+            cachedClaudeUsageResult = result
+            claudeUsageRefreshPolicy.recordSuccess(at: Date())
+            claudeTokenSourceText = "Claude Web \(webSession.sourceText)"
+            applyClaudeUsageResult(result, credentials: nil, staleMessage: nil)
+            return .loaded
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
     private func loadClaudeUsage(with credentials: ClaudeAuthResolution) async throws {
         let now = Date()
         if let cachedClaudeUsageResult,
            let skipReason = claudeUsageRefreshPolicy.skipReason(at: now, hasCachedSnapshot: true)
         {
+            if case let .rateLimited(retryAt) = skipReason,
+               await applyClaudeFallback(
+                after: .oauthRateLimited,
+                credentials: credentials,
+                retryText: durationText(until: retryAt, from: now))
+            {
+                return
+            }
+
             applyClaudeUsageResult(
                 cachedClaudeUsageResult,
                 credentials: credentials,
@@ -1567,15 +1905,118 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch ClaudeAPIError.rateLimited(let retryAfter) {
             let limitedAt = Date()
             let retryAt = claudeUsageRefreshPolicy.recordRateLimit(retryAfterHeader: retryAfter, at: limitedAt)
-            if let cachedClaudeUsageResult {
-                applyClaudeUsageResult(
-                    cachedClaudeUsageResult,
-                    credentials: credentials,
-                    staleMessage: "Claude 用量接口限流，显示缓存数据；约 \(durationText(until: retryAt, from: limitedAt)) 后重试。")
+            if await applyClaudeFallback(
+                after: .oauthRateLimited,
+                credentials: credentials,
+                retryText: durationText(until: retryAt, from: limitedAt))
+            {
                 return
             }
             throw ClaudeAPIError.rateLimited(retryAfter: retryAfter)
         }
+    }
+
+    private func applyClaudeFallback(
+        after trigger: ClaudeUsageFallbackTrigger,
+        credentials: ClaudeAuthResolution?,
+        retryText: String?,
+        initialFallbackFailures: [String] = [])
+        async -> Bool
+    {
+        let webSession = claudeWebSessionProvider.resolveSession()
+        let nextSources = ClaudeUsageFallbackPolicy.nextSources(
+            after: trigger,
+            hasClaudeCLI: claudeCLIUsageClient.isAvailable(),
+            hasClaudeWebSession: webSession != nil,
+            hasCachedOAuthSnapshot: cachedClaudeUsageResult != nil)
+        var fallbackFailures = initialFallbackFailures
+
+        for source in nextSources {
+            switch source {
+            case .claudeCLI:
+                switch await loadClaudeCLIUsageIfAvailable() {
+                case .loaded:
+                    return true
+                case .failed(let message):
+                    fallbackFailures.append("Claude CLI fallback 失败：\(message)")
+                case .unavailable:
+                    break
+                }
+            case .claudeWebAPI:
+                guard let webSession else { continue }
+                switch await loadClaudeWebUsage(with: webSession) {
+                case .loaded:
+                    return true
+                case .failed(let message):
+                    fallbackFailures.append("Claude Web fallback 失败：\(message)")
+                case .unavailable:
+                    break
+                }
+            case .cachedOAuthSnapshot:
+                if let cachedClaudeUsageResult {
+                    applyClaudeUsageResult(
+                        cachedClaudeUsageResult,
+                        credentials: credentials,
+                        staleMessage: claudeFallbackMessage(
+                            after: trigger,
+                            retryText: retryText,
+                            fallbackFailures: fallbackFailures,
+                            isShowingCachedData: true))
+                    return true
+                }
+            }
+        }
+
+        if !fallbackFailures.isEmpty {
+            claudeTokenSourceText = "Claude fallback"
+            claudeError = claudeFallbackMessage(
+                after: trigger,
+                retryText: retryText,
+                fallbackFailures: fallbackFailures,
+                isShowingCachedData: false)
+            return true
+        }
+
+        return false
+    }
+
+    private func claudeFallbackMessage(
+        after trigger: ClaudeUsageFallbackTrigger,
+        retryText: String?,
+        fallbackFailures: [String],
+        isShowingCachedData: Bool)
+        -> String
+    {
+        switch trigger {
+        case .oauthRateLimited:
+            return ClaudeUsageFallbackPolicy.rateLimitedMessage(
+                retryText: retryText,
+                fallbackFailures: fallbackFailures,
+                isShowingCachedData: isShowingCachedData)
+        case .oauthUnavailable:
+            let normalizedFailures = fallbackFailures
+                .map(stripTrailingSentencePunctuation)
+                .filter { !$0.isEmpty }
+            var message = "Claude OAuth 不可用"
+            if !normalizedFailures.isEmpty {
+                message += "，\(normalizedFailures.joined(separator: "；"))"
+            }
+            if isShowingCachedData {
+                message += "；显示缓存数据"
+            }
+            if let retryText, !retryText.isEmpty {
+                message += "；约 \(retryText) 后重试"
+            }
+            return message + "。"
+        }
+    }
+
+    private func stripTrailingSentencePunctuation(_ value: String) -> String {
+        var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        while result.last == "。" || result.last == "." {
+            result.removeLast()
+        }
+        return result
     }
 
     private func applyClaudeUsageResult(
