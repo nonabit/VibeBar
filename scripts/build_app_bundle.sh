@@ -7,11 +7,12 @@ MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-debug}"
+CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-auto}"
 OUTPUT_PATH=""
 UNIVERSAL=0
 
 usage() {
-  echo "Usage: $0 [--configuration debug|release] [--universal] [--output <path>]" >&2
+  echo "Usage: $0 [--configuration debug|release] [--universal] [--output <path>] [--sign <identity|auto|none>]" >&2
 }
 
 while [[ $# -gt 0 ]]; do
@@ -34,6 +35,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --output|-o)
       OUTPUT_PATH="${2:-}"
+      shift 2
+      ;;
+    --sign)
+      CODE_SIGN_IDENTITY="${2:-}"
       shift 2
       ;;
     --help|-h)
@@ -70,6 +75,43 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 plist_value() {
   /usr/libexec/PlistBuddy -c "Print :$1" "$ROOT_DIR/Config/Info.plist" 2>/dev/null || true
+}
+
+find_codesign_identity() {
+  local preferred="$1"
+  local fallback="$2"
+  local identities
+  identities="$(security find-identity -p codesigning -v 2>/dev/null || true)"
+
+  local identity
+  identity="$(printf '%s\n' "$identities" | sed -n "s/.*\"\($preferred[^\"]*\)\".*/\1/p" | head -n 1)"
+  if [[ -n "$identity" ]]; then
+    echo "$identity"
+    return 0
+  fi
+
+  identity="$(printf '%s\n' "$identities" | sed -n "s/.*\"\($fallback[^\"]*\)\".*/\1/p" | head -n 1)"
+  if [[ -n "$identity" ]]; then
+    echo "$identity"
+  fi
+}
+
+resolve_codesign_identity() {
+  case "$CODE_SIGN_IDENTITY" in
+    ""|none|skip)
+      return 0
+      ;;
+    auto)
+      if [[ "$CONFIGURATION" == "release" ]]; then
+        find_codesign_identity "Developer ID Application:" "Apple Development:"
+      else
+        find_codesign_identity "Apple Development:" "Developer ID Application:"
+      fi
+      ;;
+    *)
+      echo "$CODE_SIGN_IDENTITY"
+      ;;
+  esac
 }
 
 build_binary() {
@@ -161,4 +203,18 @@ cat >"$INFO_PLIST" <<PLIST
 PLIST
 
 plutil -lint "$INFO_PLIST" >/dev/null
+
+RESOLVED_CODE_SIGN_IDENTITY="$(resolve_codesign_identity)"
+if [[ -n "$RESOLVED_CODE_SIGN_IDENTITY" ]]; then
+  codesign \
+    --force \
+    --deep \
+    --options runtime \
+    --identifier "$BUNDLE_ID" \
+    --sign "$RESOLVED_CODE_SIGN_IDENTITY" \
+    "$APP_BUNDLE"
+else
+  echo "Warning: no code signing identity found; $APP_BUNDLE remains unsigned/ad-hoc." >&2
+fi
+
 echo "$APP_BUNDLE"
