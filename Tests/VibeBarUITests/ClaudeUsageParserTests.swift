@@ -38,6 +38,29 @@ func parsesClaudeOAuthUsageIntoSessionAndWeeklySnapshot() throws {
 }
 
 @Test
+func treatsWholeNumberOneAsOnePercentClaudeUtilization() throws {
+    let payload = """
+    {
+      "five_hour": {
+        "utilization": 1.0,
+        "resets_at": "2026-06-17T12:10:00.500483+00:00"
+      },
+      "seven_day": {
+        "utilization": 5.0,
+        "resets_at": "2026-06-23T05:00:00.500505+00:00"
+      }
+    }
+    """.data(using: .utf8)!
+
+    let snapshot = try ClaudeUsageParser.snapshot(from: payload, updatedAt: Date(timeIntervalSince1970: 0))
+
+    #expect(snapshot.weeklyUsed == 1)
+    #expect(snapshot.weeklyRemaining == 99)
+    #expect(snapshot.rateLimitUsed == 5)
+    #expect(snapshot.rateLimitRemaining == 95)
+}
+
+@Test
 func normalizesFractionalClaudeUtilization() throws {
     let payload = """
     {

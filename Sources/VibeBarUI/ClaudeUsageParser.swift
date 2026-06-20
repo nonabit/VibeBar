@@ -68,7 +68,7 @@ public enum ClaudeUsageParser {
     }
 
     private static func normalizedPercent(_ utilization: Double) -> Int {
-        let percent = utilization <= 1.0 ? utilization * 100.0 : utilization
+        let percent = utilization < 1.0 ? utilization * 100.0 : utilization
         return max(0, min(100, Int(percent.rounded())))
     }
 
